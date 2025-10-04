@@ -1,0 +1,84 @@
+steps:
+  # Frontend: Install deps
+  - name: 'gcr.io/cloud-builders/npm'
+    args: ['ci']
+    dir: 'frontend'
+
+  # Frontend: Run unit tests
+  - name: 'gcr.io/cloud-builders/npm'
+    args: ['test']
+    dir: 'frontend'
+
+  # Frontend: Build Docker image with $COMMIT_SHA tag
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-t'
+      - 'us-central1-docker.pkg.dev/$PROJECT_ID/my-repo/frontend:$COMMIT_SHA'
+      - '.'
+    dir: 'frontend'
+
+  # Frontend: Push image
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'us-central1-docker.pkg.dev/$PROJECT_ID/my-repo/frontend:$COMMIT_SHA']
+
+  # Backend: Install deps
+  - name: 'gcr.io/cloud-builders/npm'
+    args: ['ci']
+    dir: 'backend'
+
+  # Backend: Run unit tests
+  - name: 'gcr.io/cloud-builders/npm'
+    args: ['test']
+    dir: 'backend'
+
+  # Backend: Scan image with Trivy (fails on critical vulns)
+  - name: 'aquasec/trivy'
+    args:
+      - 'image'
+      - '--exit-code'
+      - '1'  # Fail build on vulns
+      - '--no-progress'
+      - '--scanners'
+      - 'vuln'
+      - 'us-central1-docker.pkg.dev/$PROJECT_ID/my-repo/backend:$COMMIT_SHA'
+
+  # Backend: Build Docker image with $COMMIT_SHA tag and GIT_COMMIT_SHA arg
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-t'
+      - 'us-central1-docker.pkg.dev/$PROJECT_ID/my-repo/backend:$COMMIT_SHA'
+      - '--build-arg'
+      - 'GIT_COMMIT_SHA=$COMMIT_SHA'
+      - '.'
+    dir: 'backend'
+
+  # Backend: Push image
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'us-central1-docker.pkg.dev/$PROJECT_ID/my-repo/backend:$COMMIT_SHA']
+
+  # Update frontend deployment image
+  - name: 'gcr.io/cloud-builders/kubectl'
+    args:
+      - 'set'
+      - 'image'
+      - 'deployment/frontend'
+      - 'frontend=us-central1-docker.pkg.dev/$PROJECT_ID/my-repo/frontend:$COMMIT_SHA'
+    env:
+      - 'CLOUDSDK_COMPUTE_ZONE=us-central1'
+      - 'CLOUDSDK_CONTAINER_CLUSTER=sample-autopilot'
+
+  # Update backend deployment image
+  - name: 'gcr.io/cloud-builders/kubectl'
+    args:
+      - 'set'
+      - 'image'
+      - 'deployment/backend'
+      - 'backend=us-central1-docker.pkg.dev/$PROJECT_ID/my-repo/backend:$COMMIT_SHA'
+    env:
+      - 'CLOUDSDK_COMPUTE_ZONE=us-central1'
+      - 'CLOUDSDK_CONTAINER_CLUSTER=sample-autopilot'
+
+options:
+  logging: CLOUD_LOGGING_ONLY
